@@ -4,8 +4,15 @@ on:
   repository_dispatch:
     types: [deploy_pages]
 
+# Prevent concurrent Pages deployments
+concurrency:
+  group: pages-deploy
+  cancel-in-progress: true
+
 permissions:
   contents: write
+  pages: write
+  id-token: write
 
 jobs:
   deploy:
@@ -14,15 +21,34 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate payload
+        run: |
+          if [ -z "${{ github.event.client_payload.content_b64 }}" ]; then
+            echo "❌ Missing Base64 payload"
+            exit 1
+          fi
 
       - name: Decode and write HTML
         run: |
-          echo "${{ github.event.client_payload.content_b64 }}" | base64 --decode > index.html
+          echo "${{ github.event.client_payload.content_b64 }}" \
+            | base64 --decode > index.html
 
-      - name: Commit and push
+      - name: Configure Git
         run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          git add .
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit changes (if any)
+        run: |
+          git add index.html
+
+          if git diff --cached --quiet; then
+            echo "ℹ️ No changes detected. Skipping commit."
+            exit 0
+          fi
+
           git commit -m "Automated report deploy"
           git push
